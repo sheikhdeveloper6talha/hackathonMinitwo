@@ -71,7 +71,7 @@
 <script>
 (async () => {
   let Administrator = document.getElementById('Administrator');
-  console.log(Administrator);
+  
   
   // Supabase query ko try-catch mein rakhein taake exact error handle ho sake
   try {
@@ -83,7 +83,7 @@
     if (error) {
       console.error("Supabase Error:", error.message);
     } else {
-      console.log("Admin Data:", ischeck);
+     
       ischeck[0]?.role === 'admin' ? Administrator.remove() : Administrator
     }
   } catch (err) {
