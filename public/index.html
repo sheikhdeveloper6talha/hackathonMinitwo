@@ -84,7 +84,7 @@
       console.error("Supabase Error:", error.message);
     } else {
       console.log("Admin Data:", ischeck);
-      ischeck[0].role === 'admin' ? Administrator.remove() : Administrator
+      ischeck[0]?.role === 'admin' ? Administrator.remove() : Administrator
     }
   } catch (err) {
     console.error("System Error:", err);
