@@ -104,6 +104,8 @@ select:focus-visible, textarea:focus-visible {
   position: sticky;
   top: 0;
   z-index: 50;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .brand {
@@ -125,7 +127,7 @@ select:focus-visible, textarea:focus-visible {
   font-size: 14px;
 }
 
-.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 .user-chip {
   display: flex; align-items: center; gap: 8px;
@@ -206,7 +208,6 @@ input::placeholder, textarea::placeholder { color: var(--text-dim); }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 560px) { .field-row { grid-template-columns: 1fr; } }
 
 /* ---------------- Buttons ---------------- */
 .btn {
@@ -273,7 +274,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .page-head h1 { font-size: 26px; }
 
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 26px; }
-@media (max-width: 800px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+
 .stat-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px 18px;
@@ -429,7 +430,92 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .mt-16 { margin-top: 16px; }
 .mb-0 { margin-bottom: 0; }
 
-@media (max-width: 600px) {
-  .page-head { flex-direction: column; align-items: flex-start; }
-  .stat-row { grid-template-columns: 1fr 1fr; }
+/* ============================================================
+   RESPONSIVE — Tablet (≤ 900px)
+   ============================================================ */
+@media (max-width: 900px) {
+  .page { padding: 0 18px 48px; }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+  .asset-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .field-row { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .info-grid { grid-template-columns: 1fr 1fr; }
+  .modal { max-width: 90vw; padding: 22px; }
+  .page-head h1 { font-size: 23px; }
+}
+
+/* ============================================================
+   RESPONSIVE — Mobile / Tablet portrait (≤ 768px)
+   ============================================================ */
+@media (max-width: 768px) {
+  .topbar { padding: 14px 16px; }
+  .brand { font-size: 16px; }
+  .topbar-actions { gap: 8px; }
+  .user-chip { font-size: 12px; padding: 5px 10px 5px 5px; }
+
+  .page-head { flex-direction: column; align-items: flex-start; padding: 22px 0 16px; }
+  .page-head h1 { font-size: 21px; }
+
+  .stat-row { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+  .stat-card { padding: 13px 14px; }
+  .stat-card .num { font-size: 21px; }
+
+  .toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .toolbar input[type=text], .toolbar select { max-width: 100%; width: 100%; }
+  .toolbar .btn { width: 100%; }
+
+  .asset-grid { grid-template-columns: 1fr; gap: 12px; }
+
+  .field-row { grid-template-columns: 1fr; gap: 0; }
+
+  .panel { padding: 16px; }
+  .panel-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  .modal { padding: 18px; max-width: 94vw; }
+  .modal-head h2, .modal-head h3 { font-size: 16px; }
+
+  .list-row { flex-wrap: wrap; padding: 12px 14px; }
+  .list-row .side { width: 100%; justify-content: flex-start; margin-top: 6px; }
+
+  .auth-card { padding: 24px 20px; }
+
+  .info-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .public-shell { padding: 24px 16px 48px; }
+
+  .qr-frame { width: 170px; height: 170px; }
+  .qr-frame img, .qr-frame canvas { width: 142px; height: 142px; }
+}
+
+/* ============================================================
+   RESPONSIVE — Small mobile (≤ 480px)
+   ============================================================ */
+@media (max-width: 480px) {
+  .page { padding: 0 14px 40px; }
+
+  .brand .brand-mark { width: 24px; height: 24px; font-size: 12px; }
+  .user-chip .avatar { width: 20px; height: 20px; font-size: 10px; }
+
+  .stat-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card { padding: 11px 12px; }
+  .stat-card .num { font-size: 19px; }
+  .stat-card .label { font-size: 11px; }
+
+  .btn { padding: 10px 14px; font-size: 13.5px; }
+  .btn-sm { padding: 6px 10px; font-size: 12px; }
+
+  .info-grid { grid-template-columns: 1fr; }
+
+  .asset-card { padding: 15px; }
+  .asset-card h3 { font-size: 15px; }
+
+  .status-hero { padding: 18px 14px; }
+  .status-hero h1 { font-size: 19px; }
+
+  .tabs { flex-direction: column; border-radius: var(--radius); }
+  .tab-btn { border-radius: var(--radius-sm); }
+
+  .qr-frame { width: 150px; height: 150px; }
+  .qr-frame img, .qr-frame canvas { width: 124px; height: 124px; }
+
+  #toast-stack { left: 12px; right: 12px; bottom: 12px; }
+  .toast { max-width: 100%; }
 }

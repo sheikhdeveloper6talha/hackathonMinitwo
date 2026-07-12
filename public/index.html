@@ -75,15 +75,16 @@
   
   // Supabase query ko try-catch mein rakhein taake exact error handle ho sake
   try {
-    const { data, error } = await sb
+    const { data : ischeck, error } = await sb
       .from('profiles')
-      .select('*') // select() mein '*' lagana behtar practice hai
-      .eq('role', 'admin');
+      .select() 
+      .eq('role' , 'admin')
 
     if (error) {
       console.error("Supabase Error:", error.message);
     } else {
-      console.log("Admin Data:", data);
+      console.log("Admin Data:", ischeck);
+      ischeck[0].role === 'admin' ? Administrator.remove() : Administrator
     }
   } catch (err) {
     console.error("System Error:", err);
@@ -132,9 +133,10 @@ document.getElementById("signup-form").addEventListener("submit", async (e) => {
   const password = document.getElementById("signup-password").value;
   const role = document.getElementById("signup-role").value;
 
-  const { error } = await sb.auth.signUp({
+  const { data : ischeck , error } = await sb.auth.signUp({
     email, password,
     options: { data: { full_name, role } }
+  
   });
 
   if (error) {
@@ -142,6 +144,9 @@ document.getElementById("signup-form").addEventListener("submit", async (e) => {
     btn.disabled = false; btn.textContent = "Create Account";
     return;
   }
+  
+  console.log(ischeck);
+  
 
   toast("Account created! Signing you in...", "success");
   const { error: loginErr } = await sb.auth.signInWithPassword({ email, password });
