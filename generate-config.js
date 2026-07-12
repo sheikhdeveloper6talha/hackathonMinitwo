@@ -5,4 +5,4 @@ const configContent = `window.ENV = {
   EVIDENCE_BUCKET: "${process.env.EVIDENCE_BUCKET}"
 };`;
 fs.writeFileSync('public/config.js', configContent);
-console.log('✅ config.js generated at public/js/config.js');
+console.log('✅ config.js generated');
