@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaintainIQ — Admin Dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/qrcode.min.js"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">⚙</span> MaintainIQ</div>
+  <div class="topbar-actions">
+    <a href="issues-board.html" class="btn btn-ghost btn-sm">Issues Board</a>
+    <div class="user-chip">
+      <span class="avatar" id="avatar-initial">A</span>
+      <span id="user-name">Loading...</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow">Administrator</span>
+      <h1>Asset Registry</h1>
+    </div>
+    <button class="btn btn-primary" onclick="openCreateModal()">+ Register Asset</button>
+  </div>
+
+  <div class="stat-row" id="stat-row">
+    <div class="stat-card"><div class="num" id="stat-total">—</div><div class="label">Total Assets</div></div>
+    <div class="stat-card"><div class="num" id="stat-operational">—</div><div class="label">Operational</div></div>
+    <div class="stat-card"><div class="num" id="stat-issues">—</div><div class="label">Open Issues</div></div>
+    <div class="stat-card"><div class="num" id="stat-oos">—</div><div class="label">Out of Service</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="search-input" placeholder="Search asset name or code...">
+    <select id="filter-status"><option value="">All Statuses</option></select>
+    <select id="filter-category"><option value="">All Categories</option></select>
+    <div class="spacer"></div>
+  </div>
+
+  <div id="asset-grid" class="asset-grid">
+    <div class="loading-state">Loading assets...</div>
+  </div>
+</div>
+
+<!-- CREATE / EDIT ASSET MODAL -->
+<div class="modal-overlay" id="asset-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modal-title">Register New Asset</h2>
+      <button class="modal-close" onclick="closeAssetModal()">×</button>
+    </div>
+    <form id="asset-form">
+      <input type="hidden" id="asset-id">
+      <div class="field">
+        <label>Asset Name</label>
+        <input type="text" id="asset-name" placeholder="Classroom Projector 01" required>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Category</label>
+          <select id="asset-category"></select>
+        </div>
+        <div class="field">
+          <label>Location</label>
+          <input type="text" id="asset-location" placeholder="Room 204, Block B" required>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Condition</label>
+          <select id="asset-condition">
+            <option>Excellent</option><option>Good</option><option>Fair</option><option>Poor</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select id="asset-status"></select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <textarea id="asset-description" placeholder="Model, specs, notes..."></textarea>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Last Service Date</label>
+          <input type="date" id="asset-last-service">
+        </div>
+        <div class="field">
+          <label>Next Service Date</label>
+          <input type="date" id="asset-next-service">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="asset-save-btn">Save Asset</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/supabase-client.js"></script>
+<script src="js/utils.js"></script>
+<script>
+let currentProfile = null;
+let allAssets = [];
+let openIssueCounts = {};
+
+(async function init() {
+  currentProfile = await requireAuth(["admin"]);
+  if (!currentProfile) return;
+  document.getElementById("user-name").textContent = currentProfile.full_name;
+  document.getElementById("avatar-initial").textContent = currentProfile.full_name?.[0]?.toUpperCase() || "A";
+
+  populateSelect("filter-status", ASSET_STATUSES, true);
+  populateSelect("filter-category", CATEGORIES, true);
+  populateSelect("asset-category", CATEGORIES, false);
+  populateSelect("asset-status", ASSET_STATUSES, false);
+
+  await loadAssets();
+
+  document.getElementById("search-input").addEventListener("input", renderGrid);
+  document.getElementById("filter-status").addEventListener("change", renderGrid);
+  document.getElementById("filter-category").addEventListener("change", renderGrid);
+  document.getElementById("asset-form").addEventListener("submit", saveAsset);
+})();
+
+function populateSelect(id, options, includeAll) {
+  const sel = document.getElementById(id);
+  options.forEach(opt => {
+    const o = document.createElement("option");
+    o.value = opt; o.textContent = opt;
+    sel.appendChild(o);
+  });
+}
+
+async function loadAssets() {
+  const { data: assets, error } = await sb.from("assets").select("*").order("created_at", { ascending: false });
+  if (error) { toast("Failed to load assets", "error"); return; }
+  allAssets = assets || [];
+
+  const { data: issues } = await sb.from("issues").select("asset_id, status");
+  openIssueCounts = {};
+  (issues || []).forEach(i => {
+    if (!["Resolved", "Closed"].includes(i.status)) {
+      openIssueCounts[i.asset_id] = (openIssueCounts[i.asset_id] || 0) + 1;
+    }
+  });
+
+  renderStats();
+  renderGrid();
+}
+
+function renderStats() {
+  document.getElementById("stat-total").textContent = allAssets.length;
+  document.getElementById("stat-operational").textContent = allAssets.filter(a => a.status === "Operational").length;
+  document.getElementById("stat-issues").textContent = Object.values(openIssueCounts).reduce((a, b) => a + b, 0);
+  document.getElementById("stat-oos").textContent = allAssets.filter(a => a.status === "Out of Service").length;
+}
+
+function renderGrid() {
+  const q = document.getElementById("search-input").value.toLowerCase();
+  const statusF = document.getElementById("filter-status").value;
+  const catF = document.getElementById("filter-category").value;
+
+  const filtered = allAssets.filter(a => {
+    const matchQ = !q || a.name.toLowerCase().includes(q) || a.asset_code.toLowerCase().includes(q);
+    const matchStatus = !statusF || a.status === statusF;
+    const matchCat = !catF || a.category === catF;
+    return matchQ && matchStatus && matchCat;
+  });
+
+  const grid = document.getElementById("asset-grid");
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="icon">🗂</div>No assets match your filters yet.</div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(a => `
+    <div class="asset-card" onclick="window.location.href='asset-detail.html?id=${a.id}'">
+      <span class="corner-dot tl"></span><span class="corner-dot tr"></span>
+      <div class="code">${a.asset_code}</div>
+      <h3>${escapeHtml(a.name)}</h3>
+      <div class="meta">${escapeHtml(a.location || "No location set")} · ${escapeHtml(a.category || "Uncategorized")}</div>
+      <div class="flex-between">
+        <span class="${badgeClass('badge', a.status)}">${a.status}</span>
+        ${openIssueCounts[a.id] ? `<span class="small-note">${openIssueCounts[a.id]} open issue${openIssueCounts[a.id] > 1 ? 's' : ''}</span>` : ''}
+      </div>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+
+function openCreateModal() {
+  document.getElementById("modal-title").textContent = "Register New Asset";
+  document.getElementById("asset-form").reset();
+  document.getElementById("asset-id").value = "";
+  document.getElementById("asset-modal").classList.add("open");
+}
+function closeAssetModal() {
+  document.getElementById("asset-modal").classList.remove("open");
+}
+
+async function saveAsset(e) {
+  e.preventDefault();
+  const btn = document.getElementById("asset-save-btn");
+  btn.disabled = true; btn.textContent = "Saving...";
+
+  const category = document.getElementById("asset-category").value;
+  const payload = {
+    name: document.getElementById("asset-name").value.trim(),
+    category,
+    location: document.getElementById("asset-location").value.trim(),
+    condition: document.getElementById("asset-condition").value,
+    status: document.getElementById("asset-status").value,
+    description: document.getElementById("asset-description").value.trim(),
+    last_service_date: document.getElementById("asset-last-service").value || null,
+    next_service_date: document.getElementById("asset-next-service").value || null,
+  };
+
+  // Business rule: next service date can't be before last service date
+  if (payload.last_service_date && payload.next_service_date && payload.next_service_date < payload.last_service_date) {
+    toast("Next service date can't be before last service date", "error");
+    btn.disabled = false; btn.textContent = "Save Asset";
+    return;
+  }
+
+  let assetId = document.getElementById("asset-id").value;
+
+  if (assetId) {
+    const { error } = await sb.from("assets").update(payload).eq("id", assetId);
+    if (error) { toast(error.message, "error"); btn.disabled = false; btn.textContent = "Save Asset"; return; }
+    await logHistory({ asset_id: assetId, actor_name: currentProfile.full_name, actor_id: currentProfile.id, action: "Asset details updated" });
+    toast("Asset updated");
+  } else {
+    // Generate a unique asset code, retry on collision
+    let code, inserted = false, attempts = 0;
+    while (!inserted && attempts < 5) {
+      code = generateAssetCode(category);
+      const { data, error } = await sb.from("assets").insert({
+        ...payload, asset_code: code, created_by: currentProfile.id
+      }).select().single();
+      if (!error) { inserted = true; assetId = data.id; }
+      else if (error.code === "23505") { attempts++; }
+      else { toast(error.message, "error"); btn.disabled = false; btn.textContent = "Save Asset"; return; }
+    }
+    if (!inserted) { toast("Could not generate a unique asset code, try again", "error"); btn.disabled = false; btn.textContent = "Save Asset"; return; }
+    await logHistory({ asset_id: assetId, actor_name: currentProfile.full_name, actor_id: currentProfile.id, action: "Asset registered", details: `Code ${code}` });
+    toast("Asset registered with code " + code);
+  }
+
+  closeAssetModal();
+  btn.disabled = false; btn.textContent = "Save Asset";
+  await loadAssets();
+}
+</script>
+</body>
+</html>

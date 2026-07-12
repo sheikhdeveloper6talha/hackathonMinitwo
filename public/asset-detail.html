@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaintainIQ — Asset Details</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/qrcode.min.js"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">⚙</span> MaintainIQ</div>
+  <div class="topbar-actions">
+    <a href="admin-dashboard.html" class="btn btn-ghost btn-sm">← Dashboard</a>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<div class="page" id="page-content" style="display:none;">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow" id="asset-code-label">—</span>
+      <h1 id="asset-name-label">Loading...</h1>
+    </div>
+    <div class="gap-8">
+      <button class="btn btn-ghost" id="edit-btn" onclick="window.editModal()">Edit</button>
+      <a id="open-public-link" href="#" target="_blank" class="btn btn-primary">Open Public Page ↗</a>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: 340px 1fr; gap:20px;" id="main-grid">
+    <!-- LEFT: QR + basic info -->
+    <div>
+      <div class="panel text-center">
+        <span class="eyebrow">Asset QR</span>
+        <div id="qr-container"></div>
+        <p class="small-note mt-16" id="public-url-note"></p>
+        <div class="gap-8" style="justify-content:center; margin-top:10px;">
+          <button class="btn btn-ghost btn-sm" onclick="downloadQR()">Download QR</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyLink()">Copy Link</button>
+        </div>
+      </div>
+
+      <div class="panel mt-16">
+        <span class="eyebrow">Asset Info</span>
+        <div class="info-grid">
+          <div class="info-item"><div class="k">Status</div><div class="v" id="info-status">—</div></div>
+          <div class="info-item"><div class="k">Condition</div><div class="v" id="info-condition">—</div></div>
+          <div class="info-item"><div class="k">Category</div><div class="v" id="info-category">—</div></div>
+          <div class="info-item"><div class="k">Location</div><div class="v" id="info-location">—</div></div>
+          <div class="info-item"><div class="k">Last Service</div><div class="v" id="info-last">—</div></div>
+          <div class="info-item"><div class="k">Next Service</div><div class="v" id="info-next">—</div></div>
+        </div>
+        <p id="info-description" style="margin-top:10px;"></p>
+      </div>
+    </div>
+
+    <!-- RIGHT: issues + history -->
+    <div>
+      <div class="panel">
+        <div class="panel-head"><h2>Issues for this Asset</h2></div>
+        <div class="list" id="issues-list"><div class="loading-state">Loading...</div></div>
+      </div>
+
+      <div class="panel mt-16">
+        <div class="panel-head"><h2>Asset History</h2></div>
+        <div class="timeline" id="history-timeline"><div class="loading-state">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="loading-state" id="page-loading">Loading asset...</div>
+
+<!-- EDIT MODAL -->
+<div class="modal-overlay" id="asset-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Edit Asset</h2>
+      <button class="modal-close" onclick="document.getElementById('asset-modal').classList.remove('open')">×</button>
+    </div>
+    <form id="asset-form">
+      <div class="field"><label>Asset Name</label><input type="text" id="f-name" required></div>
+      <div class="field-row">
+        <div class="field"><label>Category</label><select id="f-category"></select></div>
+        <div class="field"><label>Location</label><input type="text" id="f-location" required></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Condition</label>
+          <select id="f-condition"><option>Excellent</option><option>Good</option><option>Fair</option><option>Poor</option></select>
+        </div>
+        <div class="field"><label>Status</label><select id="f-status"></select></div>
+      </div>
+      <div class="field"><label>Description</label><textarea id="f-description"></textarea></div>
+      <div class="field-row">
+        <div class="field"><label>Last Service Date</label><input type="date" id="f-last"></div>
+        <div class="field"><label>Next Service Date</label><input type="date" id="f-next"></div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Save Changes</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/supabase-client.js"></script>
+<script src="js/utils.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const assetId = params.get("id");
+let currentProfile = null;
+let currentAsset = null;
+
+(async function init() {
+  currentProfile = await requireAuth(["admin"]);
+  if (!currentProfile) return;
+  if (!assetId) { document.getElementById("page-loading").textContent = "No asset specified."; return; }
+
+  await loadAsset();
+  await loadIssues();
+  await loadHistory();
+
+  populateSelect("f-category", CATEGORIES);
+  populateSelect("f-status", ASSET_STATUSES);
+
+  document.getElementById("asset-form").addEventListener("submit", saveEdit);
+})();
+
+function populateSelect(id, options) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = options.map(o => `<option value="${o}">${o}</option>`).join("");
+}
+
+async function loadAsset() {
+  const { data, error } = await sb.from("assets").select("*").eq("id", assetId).single();
+  if (error || !data) {
+    document.getElementById("page-loading").textContent = "Asset not found.";
+    return;
+  }
+  currentAsset = data;
+  document.getElementById("page-loading").style.display = "none";
+  document.getElementById("page-content").style.display = "block";
+
+  document.getElementById("asset-code-label").textContent = data.asset_code;
+  document.getElementById("asset-name-label").textContent = data.name;
+  document.getElementById("info-status").innerHTML = `<span class="${badgeClass('badge', data.status)}">${data.status}</span>`;
+  document.getElementById("info-condition").textContent = data.condition || "—";
+  document.getElementById("info-category").textContent = data.category || "—";
+  document.getElementById("info-location").textContent = data.location || "—";
+  document.getElementById("info-last").textContent = formatDate(data.last_service_date);
+  document.getElementById("info-next").textContent = formatDate(data.next_service_date);
+  document.getElementById("info-description").textContent = data.description || "No description provided.";
+
+  const url = data.status === "Retired"
+    ? publicAssetUrl(data.asset_code)
+    : publicAssetUrl(data.asset_code);
+  document.getElementById("open-public-link").href = url;
+  document.getElementById("public-url-note").textContent = url;
+  await renderQR("qr-container", url);
+}
+
+async function loadIssues() {
+  const { data, error } = await sb.from("issues").select("*").eq("asset_id", assetId).order("created_at", { ascending: false });
+  const list = document.getElementById("issues-list");
+  if (error || !data || data.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">📋</div>No issues reported for this asset yet.</div>`;
+    return;
+  }
+  list.innerHTML = data.map(i => `
+    <div class="list-row" onclick="window.location.href='issue-detail.html?id=${i.id}'">
+      <div class="main">
+        <div class="title">${escapeHtml(i.title)}</div>
+        <div class="sub">${i.issue_number} · reported ${formatDate(i.created_at)}</div>
+      </div>
+      <div class="side">
+        <span class="${priorityClass(i.priority)}">${i.priority}</span>
+        <span class="${badgeClass('badge', i.status)}">${i.status}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadHistory() {
+  const { data, error } = await sb.from("asset_history").select("*").eq("asset_id", assetId).order("created_at", { ascending: false });
+  const tl = document.getElementById("history-timeline");
+  if (error || !data || data.length === 0) {
+    tl.innerHTML = `<div class="empty-state"><div class="icon">🕓</div>No history recorded yet.</div>`;
+    return;
+  }
+  tl.innerHTML = data.map(h => `
+    <div class="timeline-item">
+      <div class="t-title">${escapeHtml(h.action)}</div>
+      <div class="t-meta">${formatDateTime(h.created_at)} · ${escapeHtml(h.actor_name || "System")}</div>
+      ${h.details ? `<div class="t-detail">${escapeHtml(h.details)}</div>` : ""}
+    </div>
+  `).join("");
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+
+window.editModal = function () {
+  document.getElementById("f-name").value = currentAsset.name;
+  document.getElementById("f-category").value = currentAsset.category || "";
+  document.getElementById("f-location").value = currentAsset.location || "";
+  document.getElementById("f-condition").value = currentAsset.condition || "Good";
+  document.getElementById("f-status").value = currentAsset.status;
+  document.getElementById("f-description").value = currentAsset.description || "";
+  document.getElementById("f-last").value = currentAsset.last_service_date || "";
+  document.getElementById("f-next").value = currentAsset.next_service_date || "";
+  document.getElementById("asset-modal").classList.add("open");
+};
+
+async function saveEdit(e) {
+  e.preventDefault();
+  const last = document.getElementById("f-last").value || null;
+  const next = document.getElementById("f-next").value || null;
+  if (last && next && next < last) {
+    toast("Next service date can't be before last service date", "error");
+    return;
+  }
+  const payload = {
+    name: document.getElementById("f-name").value.trim(),
+    category: document.getElementById("f-category").value,
+    location: document.getElementById("f-location").value.trim(),
+    condition: document.getElementById("f-condition").value,
+    status: document.getElementById("f-status").value,
+    description: document.getElementById("f-description").value.trim(),
+    last_service_date: last,
+    next_service_date: next,
+    updated_at: new Date().toISOString(),
+  };
+  const statusChanged = payload.status !== currentAsset.status;
+  const { error } = await sb.from("assets").update(payload).eq("id", assetId);
+  if (error) { toast(error.message, "error"); return; }
+
+  await logHistory({
+    asset_id: assetId, actor_name: currentProfile.full_name, actor_id: currentProfile.id,
+    action: statusChanged ? `Status changed to ${payload.status}` : "Asset details updated",
+  });
+
+  toast("Asset updated. Note: editing name/location does not change the QR mapping.");
+  document.getElementById("asset-modal").classList.remove("open");
+  await loadAsset();
+  await loadHistory();
+}
+
+function downloadQR() {
+  const canvas = document.querySelector("#qr-container canvas");
+  if (!canvas) return;
+  const link = document.createElement("a");
+  link.download = `${currentAsset.asset_code}-qr.png`;
+  link.href = canvas.toDataURL();
+  link.click();
+}
+
+function copyLink() {
+  const url = publicAssetUrl(currentAsset.asset_code);
+  navigator.clipboard.writeText(url);
+  toast("Public link copied");
+}
+</script>
+</body>
+</html>

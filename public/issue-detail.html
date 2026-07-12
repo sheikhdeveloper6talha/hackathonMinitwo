@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaintainIQ — Issue Details</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">⚙</span> MaintainIQ</div>
+  <div class="topbar-actions">
+    <a href="#" id="back-link" class="btn btn-ghost btn-sm">← Back</a>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<div class="page" id="page-content" style="display:none;">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow" id="issue-number-label">—</span>
+      <h1 id="issue-title-label">Loading...</h1>
+    </div>
+    <div class="gap-8">
+      <span class="badge" id="priority-badge"></span>
+      <span class="badge" id="status-badge"></span>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: 1fr 340px; gap:20px;">
+    <!-- LEFT -->
+    <div>
+      <div class="panel">
+        <span class="eyebrow">Reported Complaint</span>
+        <p id="issue-description" style="color:var(--text);"></p>
+        <div class="info-grid">
+          <div class="info-item"><div class="k">Category</div><div class="v" id="v-category">—</div></div>
+          <div class="info-item"><div class="k">Reported By</div><div class="v" id="v-reporter">—</div></div>
+          <div class="info-item"><div class="k">Reported On</div><div class="v" id="v-reported-on">—</div></div>
+          <div class="info-item"><div class="k">Asset</div><div class="v" id="v-asset">—</div></div>
+        </div>
+        <div id="evidence-preview" class="mt-16"></div>
+      </div>
+
+      <div class="panel mt-16" id="workflow-panel">
+        <span class="eyebrow">Update Status</span>
+        <p class="small-note" id="workflow-hint"></p>
+        <div class="gap-8 mt-16" id="transition-buttons" style="flex-wrap:wrap;"></div>
+      </div>
+
+      <div class="panel mt-16" id="maintenance-form-panel">
+        <span class="eyebrow">Add Maintenance Record</span>
+        <form id="maintenance-form" class="mt-16">
+          <div class="field">
+            <label>Inspection / Work Notes</label>
+            <textarea id="m-notes" placeholder="What did you find? What did you do?" required></textarea>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Parts Used</label><input type="text" id="m-parts" placeholder="e.g. HDMI cable"></div>
+            <div class="field"><label>Cost (PKR)</label><input type="number" id="m-cost" min="0" step="0.01" value="0"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Time Spent</label><input type="text" id="m-time" placeholder="e.g. 45 mins"></div>
+            <div class="field"><label>Final Condition</label>
+              <select id="m-condition"><option>Excellent</option><option>Good</option><option>Fair</option><option>Poor</option></select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Evidence (photo/video, optional)</label>
+            <input type="file" id="m-evidence" accept="image/*,video/*">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Save Maintenance Record</button>
+        </form>
+      </div>
+
+      <div class="panel mt-16">
+        <span class="eyebrow">Maintenance Records</span>
+        <div id="maintenance-list" class="mt-16"><div class="loading-state">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div>
+      <div class="panel">
+        <span class="eyebrow">Assignment</span>
+        <p id="assigned-to" class="mt-16" style="color:var(--text); font-weight:600;">Unassigned</p>
+        <button class="btn btn-ghost btn-block btn-sm" id="reassign-btn" onclick="window.location.href='issues-board.html'">Manage in Issues Board</button>
+      </div>
+
+      <div class="panel mt-16">
+        <span class="eyebrow">Issue History</span>
+        <div class="timeline mt-16" id="issue-history"><div class="loading-state">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="loading-state" id="page-loading">Loading issue...</div>
+
+<script src="js/supabase-client.js"></script>
+<script src="js/utils.js"></script>
+<script>
+
+
+const params = new URLSearchParams(window.location.search);
+const issueId = params.get("id");
+let currentProfile = null;
+let currentIssue = null;
+let currentAsset = null;
+let hasMaintenanceRecord = false;
+
+// Valid status transitions
+const TRANSITIONS = {
+  "Reported": ["Assigned"],
+  "Assigned": ["Inspection Started"],
+  "Inspection Started": ["Maintenance In Progress", "Waiting for Parts"],
+  "Maintenance In Progress": ["Waiting for Parts", "Resolved"],
+  "Waiting for Parts": ["Maintenance In Progress"],
+  "Resolved": ["Closed", "Reopened"],
+  "Closed": ["Reopened"],
+  "Reopened": ["Inspection Started", "Maintenance In Progress"],
+};
+
+// Status -> resulting asset status
+const ASSET_STATUS_FOR_ISSUE_STATUS = {
+  "Assigned": "Under Inspection",
+  "Inspection Started": "Under Inspection",
+  "Maintenance In Progress": "Under Maintenance",
+  "Waiting for Parts": "Under Maintenance",
+  "Resolved": "Operational",
+  "Reopened": "Issue Reported",
+};
+
+(async function init() {
+  currentProfile = await requireAuth(["admin", "technician"]);
+  if (!currentProfile) return;
+  document.getElementById("back-link").href = currentProfile.role === "admin" ? "issues-board.html" : "technician-dashboard.html";
+
+  if (!issueId) { document.getElementById("page-loading").textContent = "No issue specified."; return; }
+
+  await loadIssue();
+  await loadMaintenanceRecords();
+  await loadHistory();
+
+  document.getElementById("maintenance-form").addEventListener("submit", saveMaintenanceRecord);
+})();
+
+async function loadIssue() {
+  const { data, error } = await sb.from("issues").select("*").eq("id", issueId).single();
+  if (error || !data) { document.getElementById("page-loading").textContent = "Issue not found."; return; }
+  currentIssue = data;
+
+  const { data: asset } = await sb.from("assets").select("*").eq("id", data.asset_id).single();
+  currentAsset = asset;
+
+  document.getElementById("page-loading").style.display = "none";
+  document.getElementById("page-content").style.display = "block";
+
+  document.getElementById("issue-number-label").textContent = data.issue_number;
+  document.getElementById("issue-title-label").textContent = data.title;
+  document.getElementById("priority-badge").className = priorityClass(data.priority);
+  document.getElementById("priority-badge").textContent = data.priority;
+  document.getElementById("status-badge").className = badgeClass("badge", data.status);
+  document.getElementById("status-badge").textContent = data.status;
+
+  document.getElementById("issue-description").textContent = data.description;
+  document.getElementById("v-category").textContent = data.category || "—";
+  document.getElementById("v-reporter").textContent = data.reporter_name || "Anonymous";
+  document.getElementById("v-reported-on").textContent = formatDateTime(data.created_at);
+  document.getElementById("v-asset").innerHTML = asset
+    ? `<a href="asset-detail.html?id=${asset.id}">${asset.asset_code} — ${escapeHtml(asset.name)}</a>` : "—";
+
+  if (data.evidence_urls && data.evidence_urls.length) {
+    document.getElementById("evidence-preview").innerHTML =
+      `<span class="eyebrow">Evidence</span><div class="gap-8 mt-16">` +
+      data.evidence_urls.map(u => `<a href="${u}" target="_blank" class="btn btn-ghost btn-sm">View File ↗</a>`).join("") + `</div>`;
+  }
+
+  // Assignment display
+  if (data.assigned_technician) {
+    const { data: tech } = await sb.from("profiles").select("full_name").eq("id", data.assigned_technician).single();
+    document.getElementById("assigned-to").textContent = tech ? tech.full_name : "Unknown technician";
+  } else {
+    document.getElementById("assigned-to").textContent = "Unassigned";
+  }
+
+  renderWorkflow();
+  if (currentProfile.role === "admin") document.getElementById("reassign-btn").style.display = "block";
+}
+
+function canUserAct() {
+  if (currentProfile.role === "admin") return true;
+  return currentIssue.assigned_technician === currentProfile.id;
+}
+
+function renderWorkflow() {
+  const panel = document.getElementById("workflow-panel");
+  const hint = document.getElementById("workflow-hint");
+  const btnRow = document.getElementById("transition-buttons");
+
+  if (!canUserAct()) {
+    hint.textContent = "This issue is not assigned to you, so status updates are locked.";
+    btnRow.innerHTML = "";
+    document.getElementById("maintenance-form-panel").style.display = "none";
+    return;
+  }
+
+  if (currentIssue.status === "Closed") {
+    hint.textContent = "This issue is closed and cannot be edited unless reopened.";
+  } else {
+    hint.textContent = "Move this issue forward through its workflow. Each step updates the asset's live status automatically.";
+  }
+
+  const nextStates = TRANSITIONS[currentIssue.status] || [];
+  if (nextStates.length === 0) {
+    btnRow.innerHTML = `<span class="small-note">No further transitions available.</span>`;
+  } else {
+    btnRow.innerHTML = nextStates.map(s => {
+      const disabled = s === "Resolved" && !hasMaintenanceRecord;
+      return `<button class="btn ${s === 'Resolved' ? 'btn-success' : 'btn-ghost'} btn-sm" ${disabled ? 'disabled title="Add a maintenance record first"' : ''} onclick="transitionTo('${s}')">${s}</button>`;
+    }).join("");
+  }
+
+  // Maintenance form only meaningful once assigned/in-progress
+  const showForm = !["Reported", "Closed"].includes(currentIssue.status);
+  document.getElementById("maintenance-form-panel").style.display = showForm ? "block" : "none";
+}
+
+async function transitionTo(newStatus) {
+  if (newStatus === "Resolved" && !hasMaintenanceRecord) {
+    toast("Add a maintenance record before resolving this issue", "error");
+    return;
+  }
+
+  const { error } = await sb.from("issues").update({
+    status: newStatus, updated_at: new Date().toISOString()
+  }).eq("id", issueId);
+  if (error) { toast(error.message, "error"); return; }
+
+  currentIssue.status = newStatus;
+
+  // Update the linked asset's status per business rules
+  const assetStatus = ASSET_STATUS_FOR_ISSUE_STATUS[newStatus];
+  if (assetStatus && currentAsset) {
+    await sb.from("assets").update({ status: assetStatus }).eq("id", currentAsset.id);
+    currentAsset.status = assetStatus;
+  }
+
+  await logHistory({
+    asset_id: currentIssue.asset_id, issue_id: issueId,
+    actor_name: currentProfile.full_name, actor_id: currentProfile.id,
+    action: `Issue status changed to ${newStatus}`, details: currentIssue.issue_number,
+  });
+
+  toast(`Status updated to ${newStatus}`);
+  await loadIssue();
+  await loadHistory();
+}
+
+async function saveMaintenanceRecord(e) {
+  e.preventDefault();
+  const cost = parseFloat(document.getElementById("m-cost").value || "0");
+  if (cost < 0) { toast("Cost cannot be negative", "error"); return; }
+
+  let evidenceUrls = [];
+  const file = document.getElementById("m-evidence").files[0];
+  if (file) {
+    const url = await uploadEvidence(file, currentIssue.issue_number);
+    if (url) evidenceUrls.push(url);
+  }
+
+  const payload = {
+    issue_id: issueId,
+    technician_id: currentProfile.id,
+    notes: document.getElementById("m-notes").value.trim(),
+    parts_used: document.getElementById("m-parts").value.trim(),
+    cost, time_spent: document.getElementById("m-time").value.trim(),
+    final_condition: document.getElementById("m-condition").value,
+    evidence_urls: evidenceUrls,
+  };
+
+  const { error } = await sb.from("maintenance_records").insert(payload);
+  if (error) { toast(error.message, "error"); return; }
+
+  // Keep asset's condition field in sync with latest maintenance finding
+  if (currentAsset) {
+    await sb.from("assets").update({ condition: payload.final_condition }).eq("id", currentAsset.id);
+  }
+
+  await logHistory({
+    asset_id: currentIssue.asset_id, issue_id: issueId,
+    actor_name: currentProfile.full_name, actor_id: currentProfile.id,
+    action: "Maintenance record added", details: payload.notes.slice(0, 120),
+  });
+
+  toast("Maintenance record saved");
+  document.getElementById("maintenance-form").reset();
+  await loadMaintenanceRecords();
+  await loadHistory();
+  renderWorkflow();
+}
+
+async function loadMaintenanceRecords() {
+  const { data, error } = await sb.from("maintenance_records").select("*").eq("issue_id", issueId).order("created_at", { ascending: false });
+  hasMaintenanceRecord = !error && data && data.length > 0;
+  const list = document.getElementById("maintenance-list");
+
+  if (!data || data.length === 0) {
+    list.innerHTML = `<p class="small-note">No maintenance records yet. An issue can't be resolved without at least one.</p>`;
+    renderWorkflow();
+    return;
+  }
+
+  list.innerHTML = data.map(m => `
+    <div class="tag-card mb-0" style="margin-bottom:12px;">
+      <div class="flex-between">
+        <span class="small-note">${formatDateTime(m.created_at)}</span>
+        <span class="small-note">PKR ${Number(m.cost).toLocaleString()}</span>
+      </div>
+      <p style="color:var(--text); margin:8px 0;">${escapeHtml(m.notes)}</p>
+      <div class="info-grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="info-item"><div class="k">Parts</div><div class="v" style="font-size:12.5px;">${escapeHtml(m.parts_used || "—")}</div></div>
+        <div class="info-item"><div class="k">Time</div><div class="v" style="font-size:12.5px;">${escapeHtml(m.time_spent || "—")}</div></div>
+        <div class="info-item"><div class="k">Condition</div><div class="v" style="font-size:12.5px;">${escapeHtml(m.final_condition || "—")}</div></div>
+      </div>
+      ${m.evidence_urls && m.evidence_urls.length ? `<a href="${m.evidence_urls[0]}" target="_blank" class="small-note">View evidence ↗</a>` : ""}
+    </div>
+  `).join("");
+  renderWorkflow();
+}
+
+async function loadHistory() {
+  const { data } = await sb.from("asset_history").select("*").eq("issue_id", issueId).order("created_at", { ascending: false });
+  const tl = document.getElementById("issue-history");
+  if (!data || data.length === 0) {
+    tl.innerHTML = `<p class="small-note">No history yet.</p>`;
+    return;
+  }
+  tl.innerHTML = data.map(h => `
+    <div class="timeline-item">
+      <div class="t-title">${escapeHtml(h.action)}</div>
+      <div class="t-meta">${formatDateTime(h.created_at)} · ${escapeHtml(h.actor_name || "System")}</div>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

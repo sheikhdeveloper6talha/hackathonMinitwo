@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaintainIQ — My Work</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">⚙</span> MaintainIQ</div>
+  <div class="topbar-actions">
+    <div class="user-chip">
+      <span class="avatar" id="avatar-initial">T</span>
+      <span id="user-name">Loading...</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow">Technician</span>
+      <h1>My Assigned Work</h1>
+    </div>
+  </div>
+
+  <div class="stat-row" style="grid-template-columns: repeat(3, 1fr);">
+    <div class="stat-card"><div class="num" id="stat-open">—</div><div class="label">Open</div></div>
+    <div class="stat-card"><div class="num" id="stat-progress">—</div><div class="label">In Progress</div></div>
+    <div class="stat-card"><div class="num" id="stat-resolved">—</div><div class="label">Resolved</div></div>
+  </div>
+
+  <div class="toolbar">
+    <select id="filter-status"><option value="">All Statuses</option></select>
+    <div class="spacer"></div>
+  </div>
+
+  <div class="list" id="issue-list"><div class="loading-state">Loading your issues...</div></div>
+</div>
+
+<script src="js/supabase-client.js"></script>
+<script src="js/utils.js"></script>
+<script>
+let currentProfile = null;
+let allIssues = [];
+let assetLookup = {};
+
+
+(async function init() {
+  currentProfile = await requireAuth(["technician"]);
+  if (!currentProfile) return;
+  document.getElementById("user-name").textContent = currentProfile.full_name;
+  document.getElementById("avatar-initial").textContent = currentProfile.full_name?.[0]?.toUpperCase() || "T";
+
+  document.getElementById("filter-status").innerHTML =
+    `<option value="">All Statuses</option>` + ISSUE_STATUSES.map(s => `<option value="${s}">${s}</option>`).join("");
+
+  await loadIssues();
+  document.getElementById("filter-status").addEventListener("change", renderList);
+})();
+
+async function loadIssues() {
+  const { data: issues, error } = await sb.from("issues")
+    .select("*")
+    .eq("assigned_technician", currentProfile.id)
+    .order("created_at", { ascending: false });
+
+  if (error) { toast("Failed to load issues", "error"); return; }
+  allIssues = issues || [];
+
+  const assetIds = [...new Set(allIssues.map(i => i.asset_id))];
+  if (assetIds.length) {
+    const { data: assets } = await sb.from("assets").select("id, name, asset_code").in("id", assetIds);
+    (assets || []).forEach(a => assetLookup[a.id] = a);
+  }
+
+  document.getElementById("stat-open").textContent = allIssues.filter(i => ["Reported", "Assigned"].includes(i.status)).length;
+  document.getElementById("stat-progress").textContent = allIssues.filter(i => ["Inspection Started", "Maintenance In Progress", "Waiting for Parts"].includes(i.status)).length;
+  document.getElementById("stat-resolved").textContent = allIssues.filter(i => ["Resolved", "Closed"].includes(i.status)).length;
+
+  renderList();
+}
+
+function renderList() {
+  const statusF = document.getElementById("filter-status").value;
+  const filtered = allIssues.filter(i => !statusF || i.status === statusF);
+  const list = document.getElementById("issue-list");
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🧰</div>No issues assigned to you yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(i => {
+    const asset = assetLookup[i.asset_id] || {};
+    return `
+    <div class="list-row" onclick="window.location.href='issue-detail.html?id=${i.id}'">
+      <div class="main">
+        <div class="title">${escapeHtml(i.title)}</div>
+        <div class="sub">${asset.asset_code || ""} · ${escapeHtml(asset.name || "Unknown asset")} · ${i.issue_number}</div>
+      </div>
+      <div class="side">
+        <span class="${priorityClass(i.priority)}">${i.priority}</span>
+        <span class="${badgeClass('badge', i.status)}">${i.status}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

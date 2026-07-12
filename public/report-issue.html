@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaintainIQ — Report an Issue</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">⚙</span> MaintainIQ</div>
+</div>
+
+<div class="public-shell" id="form-shell" style="display:none;">
+  <div class="public-header">
+    <span class="eyebrow" id="asset-code-line">—</span>
+    <h1 id="asset-name-line">Report an Issue</h1>
+  </div>
+
+  <div class="panel">
+    <div class="field">
+      <label>Describe the problem</label>
+      <textarea id="complaint" placeholder="e.g. The projector display is flickering and sometimes does not detect HDMI." required></textarea>
+      <p class="hint">Write in your own words — we'll help turn it into a structured report.</p>
+    </div>
+    <button type="button" class="btn btn-ghost btn-block" id="triage-btn" onclick="runTriage()">✨ Suggest Title, Category &amp; Priority</button>
+    <div id="triage-result" style="display:none;" class="mt-16">
+      <div class="tag-card">
+        <span class="eyebrow">AI Suggestion — review before submitting</span>
+        <div id="triage-causes" class="small-note mt-16"></div>
+        <div id="triage-checks" class="small-note mt-16"></div>
+      </div>
+    </div>
+  </div>
+
+  <form id="issue-form" class="panel mt-16">
+    <div class="field">
+      <label>Issue Title</label>
+      <input type="text" id="title" placeholder="Short, clear title" required>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Category</label>
+        <select id="category"></select>
+      </div>
+      <div class="field">
+        <label>Priority</label>
+        <select id="priority"></select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Your Name</label>
+        <input type="text" id="reporter-name" placeholder="Optional" >
+      </div>
+      <div class="field">
+        <label>Contact (phone/email)</label>
+        <input type="text" id="reporter-contact" placeholder="Optional">
+      </div>
+    </div>
+    <div class="field">
+      <label>Evidence (photo/video, optional)</label>
+      <input type="file" id="evidence-file" accept="image/*,video/*">
+    </div>
+    <button type="submit" class="btn btn-primary btn-block" id="submit-btn">Submit Issue Report</button>
+  </form>
+</div>
+
+<div class="empty-state" id="not-found" style="display:none;">
+  <div class="icon">🚫</div>
+  <h2>Asset Not Found</h2>
+  <p>We couldn't find this asset. Please scan the QR code again or contact your facility administrator.</p>
+</div>
+
+<div class="empty-state" id="success-state" style="display:none;">
+  <div class="icon">✅</div>
+  <h2>Issue Reported</h2>
+  <p>Your issue number is <strong id="success-issue-number" class="mono"></strong>. The maintenance team has been notified.</p>
+  <a href="#" id="back-to-asset" class="btn btn-ghost">Back to Asset Page</a>
+</div>
+
+<div class="loading-state" id="page-loading">Loading...</div>
+
+<script src="js/supabase-client.js"></script>
+<script src="js/utils.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const assetCode = params.get("code");
+let currentAsset = null;
+
+(async function init() {
+  if (!assetCode) { showNotFound(); return; }
+  const { data, error } = await sb.from("assets").select("*").eq("asset_code", assetCode).single();
+  if (error || !data) { showNotFound(); return; }
+  currentAsset = data;
+
+  if (data.status === "Retired") {
+    document.getElementById("page-loading").style.display = "none";
+    document.getElementById("not-found").style.display = "block";
+    document.querySelector("#not-found h2").textContent = "Asset Retired";
+    document.querySelector("#not-found p").textContent = "This asset has been retired and can no longer receive issue reports.";
+    return;
+  }
+
+  document.getElementById("page-loading").style.display = "none";
+  document.getElementById("form-shell").style.display = "block";
+  document.getElementById("asset-code-line").textContent = data.asset_code;
+  document.getElementById("asset-name-line").textContent = "Report an Issue — " + data.name;
+  document.getElementById("back-to-asset").href = `public-asset.html?code=${encodeURIComponent(data.asset_code)}`;
+
+  populateSelect("category", CATEGORIES);
+  populateSelect("priority", PRIORITIES);
+  document.getElementById("priority").value = "Medium";
+
+  document.getElementById("issue-form").addEventListener("submit", submitIssue);
+})();
+
+function populateSelect(id, options) {
+  document.getElementById(id).innerHTML = options.map(o => `<option value="${o}">${o}</option>`).join("");
+}
+
+function showNotFound() {
+  document.getElementById("page-loading").style.display = "none";
+  document.getElementById("not-found").style.display = "block";
+}
+
+/* ------------------------------------------------------------
+   Rule-based Issue Triage (client-side, no API key needed)
+   Converts a free-text complaint into a structured suggestion.
+   Swap this out for a real GenAI call (via a Supabase Edge
+   Function that holds the API key server-side) if available.
+------------------------------------------------------------- */
+const TRIAGE_RULES = [
+  { keys: ["leak", "water", "dripping"], category: "Plumbing", priority: "High",
+    causes: "Blocked drain line, worn seal/gasket, or condensation buildup.",
+    checks: "Turn off water/power supply near the leak if safety allows; place a container to catch drips; avoid contact with any nearby electrical points." },
+  { keys: ["flicker", "hdmi", "display", "screen", "no power", "not turning on"], category: "IT/Electronics", priority: "Medium",
+    causes: "Loose or damaged cable, faulty port, or power supply fault.",
+    checks: "Check cable connections; try an alternate cable/port; note if the issue is intermittent or constant." },
+  { keys: ["noise", "vibration", "grinding", "rattling"], category: "Mechanical", priority: "Medium",
+    causes: "Worn bearings, loose mounting, or a foreign object caught in moving parts.",
+    checks: "Do not operate the equipment further; visually inspect for loose parts; note when the noise occurs." },
+  { keys: ["spark", "smoke", "burning smell", "shock", "exposed wire"], category: "Electrical", priority: "Critical",
+    causes: "Damaged wiring, overloaded circuit, or component failure.",
+    checks: "Switch off power immediately at the source; keep people away from the area; do not touch exposed wiring." },
+  { keys: ["ac", "cooling", "hot", "not cooling", "hvac", "temperature"], category: "HVAC", priority: "High",
+    causes: "Blocked drain pipe, dirty filter, low refrigerant, or frozen coil.",
+    checks: "Turn off the unit if water is near electrical wiring; inspect the filter; avoid forcing the unit to restart repeatedly." },
+  { keys: ["crack", "broken", "damaged", "torn", "wobbly"], category: "Structural", priority: "High",
+    causes: "Material fatigue, impact damage, or installation failure.",
+    checks: "Keep the area clear if there's a risk of collapse or injury; avoid using the asset until inspected." },
+  { keys: ["dirty", "stain", "smell", "clean"], category: "Other", priority: "Low",
+    causes: "Routine wear or lack of scheduled cleaning.",
+    checks: "No immediate safety action required; schedule for routine servicing." },
+];
+
+function runTriage() {
+  const text = document.getElementById("complaint").value.trim();
+  if (!text) { toast("Please describe the problem first", "error"); return; }
+
+  const lower = text.toLowerCase();
+  let match = TRIAGE_RULES.find(r => r.keys.some(k => lower.includes(k)));
+  if (!match) {
+    match = { category: "Other", priority: "Medium",
+      causes: "Cause unclear from description — a technician should inspect and confirm.",
+      checks: "No immediate safety action identified; a technician should perform a general inspection." };
+  }
+
+  // Build a clean suggested title from the first clause of the complaint
+  let title = text.split(/[.,;]/)[0].trim();
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  if (title.length > 70) title = title.slice(0, 67) + "...";
+
+  document.getElementById("title").value = title;
+  document.getElementById("category").value = match.category;
+  document.getElementById("priority").value = match.priority;
+
+  document.getElementById("triage-causes").innerHTML = `<strong>Possible causes:</strong> ${match.causes}`;
+  document.getElementById("triage-checks").innerHTML = `<strong>Initial checks:</strong> ${match.checks} <br><em>For any electrical, structural, or fire-related risk, always wait for a qualified technician.</em>`;
+  document.getElementById("triage-result").style.display = "block";
+
+  toast("Suggestion applied — review and edit before submitting");
+}
+
+async function submitIssue(e) {
+  e.preventDefault();
+  const btn = document.getElementById("submit-btn");
+  btn.disabled = true; btn.textContent = "Submitting...";
+
+  let evidenceUrls = [];
+  const file = document.getElementById("evidence-file").files[0];
+  if (file) {
+    const url = await uploadEvidence(file, currentAsset.asset_code);
+    if (url) evidenceUrls.push(url);
+  }
+
+  const issueNumber = generateIssueNumber();
+  const payload = {
+    issue_number: issueNumber,
+    asset_id: currentAsset.id,
+    title: document.getElementById("title").value.trim(),
+    description: document.getElementById("complaint").value.trim(),
+    category: document.getElementById("category").value,
+    priority: document.getElementById("priority").value,
+    status: "Reported",
+    reporter_name: document.getElementById("reporter-name").value.trim() || "Anonymous",
+    reporter_contact: document.getElementById("reporter-contact").value.trim(),
+    evidence_urls: evidenceUrls,
+  };
+
+  const { error } = await sb.from("issues").insert(payload);
+  if (error) {
+    toast(error.message, "error");
+    btn.disabled = false; btn.textContent = "Submit Issue Report";
+    return;
+  }
+
+  // Business rule: new issue -> asset status becomes "Issue Reported" (unless already worse-off)
+  if (!["Out of Service", "Retired"].includes(currentAsset.status)) {
+    await sb.from("assets").update({ status: "Issue Reported" }).eq("id", currentAsset.id);
+  }
+
+  await logHistory({
+    asset_id: currentAsset.id, actor_name: payload.reporter_name,
+    action: "Issue reported", details: `${issueNumber} — ${payload.title}`,
+  });
+
+  document.getElementById("form-shell").style.display = "none";
+  document.getElementById("success-state").style.display = "block";
+  document.getElementById("success-issue-number").textContent = issueNumber;
+}
+</script>
+</body>
+</html>
