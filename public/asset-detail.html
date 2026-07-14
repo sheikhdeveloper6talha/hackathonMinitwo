@@ -107,7 +107,11 @@
 <script src="js/utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
+
+
 const assetId = params.get("id");
+
+
 let currentProfile = null;
 let currentAsset = null;
 
@@ -119,6 +123,42 @@ let currentAsset = null;
   await loadAsset();
   await loadIssues();
   await loadHistory();
+
+  // ==========================================
+  // REALTIME CONNECTION (NO LOGIC CHANGE)
+  // ==========================================
+  const detailRealtimeChannel = sb
+    .channel(`realtime-asset-detail-${assetId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'assets', filter: `id=eq.${assetId}` },
+      async (payload) => {
+        console.log('Asset details mein live badlao hua!', payload);
+        await loadAsset();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'issues', filter: `asset_id=eq.${assetId}` },
+      async (payload) => {
+        console.log('Asset issues mein live badlao hua!', payload);
+        await loadIssues();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'asset_history', filter: `asset_id=eq.${assetId}` },
+      async (payload) => {
+        console.log('Asset history timeline mein live badlao hua!', payload);
+        await loadHistory();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Asset detail page realtime connection active ho gaya hai!');
+      }
+    });
+  // ==========================================
 
   populateSelect("f-category", CATEGORIES);
   populateSelect("f-status", ASSET_STATUSES);
@@ -150,6 +190,7 @@ async function loadAsset() {
   document.getElementById("info-last").textContent = formatDate(data.last_service_date);
   document.getElementById("info-next").textContent = formatDate(data.next_service_date);
   document.getElementById("info-description").textContent = data.description || "No description provided.";
+  console.log(data.status);
 
   const url = data.status === "Retired"
     ? publicAssetUrl(data.asset_code)
@@ -249,12 +290,34 @@ async function saveEdit(e) {
 }
 
 function downloadQR() {
-  const canvas = document.querySelector("#qr-container canvas");
-  if (!canvas) return;
+  // 1. Screen par dikh rahe asli canvas ko pakdein
+  const originalCanvas = document.querySelector("#qr-container canvas");
+  if (!originalCanvas) {
+    alert("QR Code abhi generate nahi hua hai!");
+    return;
+  }
+
+  // 2. Ek naya temporary canvas banayein taaki quality kharab na ho
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = originalCanvas.width;
+  tempCanvas.height = originalCanvas.height;
+  const ctx = tempCanvas.getContext("2d");
+
+  // 3. Sabse pehle solid White background draw karein (Tension khatam!)
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+  // 4. White background ke upar original QR code ko draw karein
+  ctx.drawImage(originalCanvas, 0, 0);
+
+  // 5. Ab isko achhi quality PNG mein download karwayein
   const link = document.createElement("a");
   link.download = `${currentAsset.asset_code}-qr.png`;
-  link.href = canvas.toDataURL();
+  link.href = tempCanvas.toDataURL("image/png");
+  
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
 }
 
 function copyLink() {

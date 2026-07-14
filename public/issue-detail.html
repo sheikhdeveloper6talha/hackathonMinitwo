@@ -139,11 +139,55 @@ const ASSET_STATUS_FOR_ISSUE_STATUS = {
   document.getElementById("back-link").href = currentProfile.role === "admin" ? "issues-board.html" : "technician-dashboard.html";
 
   if (!issueId) { document.getElementById("page-loading").textContent = "No issue specified."; return; }
+await loadHistory()
+await loadIssue()
+await loadMaintenanceRecords()
 
-  await loadIssue();
-  await loadMaintenanceRecords();
-  await loadHistory();
+  // 1. Supabase ka Realtime Channel banna
+const assetChannel = sb
+  .channel('schema-db-changes')
+  
+  // 1. Pehli Table: 'assets'
+  .on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'issues' },
+    async (payload) => {
+      console.log('Assets table mein change hua!', payload);
+      await loadIssue();
+     
+    }
+  )
+  
+  // 2. Doosri Table: 'issues'
+  .on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'maintenance_records' },
+    async (payload) => {
+      console.log('Issues table mein change hua!', payload);
+      
+      await loadMaintenanceRecords();
+      
+    }
+  )
 
+  // 3. Teesri Table: 'maintenance' (Agar aap lagana chahein)
+  .on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'asset_history' },
+    async (payload) => {
+      console.log('Maintenance table mein change hua!', payload);
+      
+      
+      await loadHistory();
+    }
+  )
+  
+  // Aakhiri mein ek hi baar subscribe karna hai
+  .subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      console.log('Realtime channel sabhi tables ke liye active ho gaya hai!');
+    }
+  });
   document.getElementById("maintenance-form").addEventListener("submit", saveMaintenanceRecord);
 })();
 

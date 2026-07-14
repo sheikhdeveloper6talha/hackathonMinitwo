@@ -151,5 +151,8 @@ async function uploadEvidence(file, folder = "general") {
 // ---------- Public URL builder for QR ----------
 function publicAssetUrl(assetCode) {
   const base = window.location.origin + window.location.pathname.replace(/[^/]+$/, "");
+  console.log(base);
+  console.log
+  (`${base}public-asset.html?code=${encodeURIComponent(assetCode)}`)
   return `${base}public-asset.html?code=${encodeURIComponent(assetCode)}`;
 }

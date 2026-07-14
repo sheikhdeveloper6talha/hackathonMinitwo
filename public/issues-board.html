@@ -73,21 +73,56 @@ console.log('ashash');
   document.getElementById("filter-priority").innerHTML =
     `<option value="">All Priorities</option>` + PRIORITIES.map(s => `<option value="${s}">${s}</option>`).join("");
 
-  const { data: techs } = await sb.from('profiles')
-  .select()
-  .eq('role' , 'technician')
-  console.log(techs);
+  // Technicians load karna aur select dropdown populate karna
+  await loadTechnicians();
   
-  technicians = techs || [];
-  document.getElementById("technician-select").innerHTML =
-    technicians.map(t => `<option value="${t.id}">${t.full_name}</option>`).join("") || `<option value="">No technicians registered yet</option>`;
-
+  // Issues load karna
   await loadIssues();
+
+  // YAHAN SE LIVE CHANNEL SHURU HOTA HAI (Realtime Connection)
+  const issueChannel = sb
+    .channel('realtime-issues-channel')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'issues' },
+      async (payload) => {
+        console.log('Issues table mein realtime badlao hua!', payload);
+        // Bina page refresh kiye issues ko reload karega
+        await loadIssues();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'profiles' },
+      async (payload) => {
+        console.log('Profiles/Technicians table mein realtime badlao hua!', payload);
+        // Agar koi naya technician add ya edit ho toh dropdown aur list refresh karega
+        await loadTechnicians();
+        renderList();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Realtime issues channel successfully connect ho gaya!');
+      }
+    });
 
   document.getElementById("search-input").addEventListener("input", renderList);
   document.getElementById("filter-status").addEventListener("change", renderList);
   document.getElementById("filter-priority").addEventListener("change", renderList);
 })();
+
+// Technicians load karne ka function (ise alag kiya taaki realtime par dobara call ho sake)
+async function loadTechnicians() {
+  const { data: techs } = await sb.from('profiles')
+    .select()
+    .eq('role', 'technician');
+  console.log(techs);
+  
+  technicians = techs || [];
+  document.getElementById("technician-select").innerHTML =
+    technicians.map(t => `<option value="${t.id}">${t.full_name}</option>`).join("") || `<option value="">No technicians registered yet</option>`;
+}
 
 async function loadIssues() {
   const { data: issues, error } = await sb.from("issues").select("*").order("created_at", { ascending: false });

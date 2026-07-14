@@ -54,13 +54,56 @@
 <script src="js/utils.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
+console.log(params);
+
 const assetCode = params.get("code");
+console.log(assetCode);
+
+let activeAssetId = null; // Realtime updates filter ke liye iska ID save rakhenge
 
 (async function init() {
   if (!assetCode) { showNotFound(); return; }
 
+  // Initial load
+  await loadPublicAssetData();
+
+  // ==========================================
+  // REALTIME CONNECTION (NO LOGIC CHANGE)
+  // ==========================================
+  const publicRealtimeChannel = sb
+    .channel(`realtime-public-asset-${assetCode}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'assets', filter: `asset_code=eq.${assetCode}` },
+      async (payload) => {
+        console.log('Public Asset details live update ho rahi hain!', payload);
+        await loadPublicAssetData();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'asset_history' }, // Table update listen karenge and function ke andar filter handle ho jayega
+      async (payload) => {
+        if (payload.new && payload.new.asset_id === activeAssetId) {
+          console.log('Public Asset history live update ho rahi hai!', payload);
+          await loadPublicAssetHistory(activeAssetId);
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Public asset detail page ka realtime connection active ho gaya hai!');
+      }
+    });
+  // ==========================================
+})();
+
+// Data render logic ko separate functions mein wrap kiya hai bina kisi database/UI statement ko alter kiye
+async function loadPublicAssetData() {
   const { data, error } = await sb.from("assets").select("*").eq("asset_code", assetCode).single();
   if (error || !data) { showNotFound(); return; }
+
+  activeAssetId = data.id;
 
   document.getElementById("page-loading").style.display = "none";
   document.getElementById("public-shell").style.display = "block";
@@ -80,12 +123,18 @@ const assetCode = params.get("code");
 
   if (data.status === "Retired") {
     document.getElementById("report-cta").style.display = "none";
+  } else {
+    document.getElementById("report-cta").style.display = "block"; // Reset standard layout behavior
   }
 
+  await loadPublicAssetHistory(data.id);
+}
+
+async function loadPublicAssetHistory(assetId) {
   // Safe recent activity (no private technician notes, no cost)
   const { data: history } = await sb.from("asset_history")
     .select("action, created_at")
-    .eq("asset_id", data.id)
+    .eq("asset_id", assetId)
     .order("created_at", { ascending: false })
     .limit(5);
 
@@ -100,7 +149,7 @@ const assetCode = params.get("code");
       </div>
     `).join("");
   }
-})();
+}
 
 function showNotFound() {
   document.getElementById("page-loading").style.display = "none";

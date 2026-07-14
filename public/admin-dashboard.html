@@ -124,6 +124,36 @@ let openIssueCounts = {};
 
   await loadAssets();
 
+  // ==========================================
+  // REALTIME CONNECTION (NO LOGIC CHANGE)
+  // ==========================================
+  const assetRealtimeChannel = sb
+    .channel('realtime-assets-dashboard')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'assets' },
+      async (payload) => {
+        console.log('Assets table mein realtime badlao hua!', payload);
+        // Live reload bina page refresh kiye
+        await loadAssets();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'issues' },
+      async (payload) => {
+        console.log('Issues table mein realtime badlao hua!', payload);
+        // Live issues reload bina page refresh kiye
+        await loadAssets();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Dashboard realtime channel successfully active ho gaya hai!');
+      }
+    });
+  // ==========================================
+
   document.getElementById("search-input").addEventListener("input", renderGrid);
   document.getElementById("filter-status").addEventListener("change", renderGrid);
   document.getElementById("filter-category").addEventListener("change", renderGrid);
