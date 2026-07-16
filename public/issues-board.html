@@ -6,6 +6,7 @@
 <title>MaintainIQ — Issues Board</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 </head>
 <body>
 
@@ -56,6 +57,7 @@
 <script src="./config.js"></script>
 <script  src="js/supabase-client.js"></script>
 <script src="js/utils.js"></script>
+<script src="./sw.js"></script>
 <script>
 let currentProfile = null;
 let allIssues = [];
@@ -79,15 +81,48 @@ console.log('ashash');
   // Issues load karna
   await loadIssues();
 
-  // YAHAN SE LIVE CHANNEL SHURU HOTA HAI (Realtime Connection)
+  // Page load hote hi push notification subscribe karna
+  subscribeToPush();
+
+  // =========================================================================
+  // YAHAN SE LIVE CHANNEL SHURU HOTA HAI (Bina Kisi Webhook ke, Realtime notification)
+  // =========================================================================
   const issueChannel = sb
     .channel('realtime-issues-channel')
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'issues' },
+      { event: 'INSERT', schema: 'public', table: 'issues' }, // Sirf INSERT event par focus
       async (payload) => {
-        console.log('Issues table mein realtime badlao hua!', payload);
+        console.log('Issues table mein naya insert hua!', payload);
+        
+        
+
         // Bina page refresh kiye issues ko reload karega
+        await loadIssues();
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'issues' }, // Status updates aur assignment ke liye
+      async (payload) => {
+        console.log('Issues table mein update badlao hua!', payload);
+        
+        const oldTech = payload.old ? payload.old.assigned_technician : null;
+        const newTech = payload.new.assigned_technician;
+        if (newTech && oldTech !== newTech) {
+          triggerLocalNotification(
+            '🔧 Technician Assigned',
+            `Issue "${payload.new.title}" par technician assign ho chuka hai.`,
+            `issue-detail.html?id=${payload.new.id}`
+          );
+        } else {
+          triggerLocalNotification(
+            '🔄 Issue Status Updated',
+            `Issue "${payload.new.title}" ka status ab "${payload.new.status}" ho gaya hai.`,
+            `issue-detail.html?id=${payload.new.id}`
+          );
+        }
+
         await loadIssues();
       }
     )
@@ -95,8 +130,7 @@ console.log('ashash');
       'postgres_changes',
       { event: '*', schema: 'public', table: 'profiles' },
       async (payload) => {
-        console.log('Profiles/Technicians table mein realtime badlao hua!', payload);
-        // Agar koi naya technician add ya edit ho toh dropdown aur list refresh karega
+        console.log('Profiles table mein badlao hua!', payload);
         await loadTechnicians();
         renderList();
       }
@@ -106,18 +140,18 @@ console.log('ashash');
         console.log('Realtime issues channel successfully connect ho gaya!');
       }
     });
+  // =========================================================================
 
   document.getElementById("search-input").addEventListener("input", renderList);
   document.getElementById("filter-status").addEventListener("change", renderList);
   document.getElementById("filter-priority").addEventListener("change", renderList);
 })();
 
-// Technicians load karne ka function (ise alag kiya taaki realtime par dobara call ho sake)
+// Technicians load karne ka function
 async function loadTechnicians() {
   const { data: techs } = await sb.from('profiles')
     .select()
     .eq('role', 'technician');
-  console.log(techs);
   
   technicians = techs || [];
   document.getElementById("technician-select").innerHTML =
@@ -209,6 +243,74 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str || "";
   return div.innerHTML;
+}
+
+// =========================================================================
+// LOCAL NOTIFICATION (Tab OPEN hote hue turant popup ke liye)
+// =========================================================================
+function triggerLocalNotification(title, body, targetUrl = '') {
+  if (!("Notification" in window)) return;
+
+  if (Notification.permission === "granted") {
+    setTimeout(() => {
+      const notification = new Notification(title, {
+        body: body,
+        tag: 'issue-alert-' + Date.now(),
+        requireInteraction: true
+      });
+
+      notification.onclick = function(event) {
+        event.preventDefault();
+        window.focus();
+        if (targetUrl) {
+          window.location.href = targetUrl;
+        }
+        notification.close();
+      };
+    }, 100);
+  }
+}
+
+// =========================================================================
+// PUSH NOTIFICATION SETUP (Tab BAND hone par bhi notification ke liye)
+// ============================x  =============================================
+
+const VAPID_PUBLIC_KEY = "BIMo5HUt4qNzfksH4OrYa5Wd75mmcxqqSF6xzIbZgQA5-mOzGGbHnhDjHSk0IrGivCxBEmr2_gHrYL_FSf-km5s";
+
+async function subscribeToPush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    await navigator.serviceWorker.ready;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+
+    const json = sub.toJSON();
+    await sb.from("push_subscriptions").upsert({
+      profile_id: currentProfile.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    }, { onConflict: "endpoint" });
+
+    console.log("Push subscription saved!");
+  } catch (err) {
+    console.log("Push subscribe fail hua:", err);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 </script>
 </body>
